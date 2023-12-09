@@ -143,6 +143,7 @@ def webui():
         os.environ.setdefault('SD_WEBUI_RESTARTING', '1')
 
         print('Restarting UI...')
+        print('Restarting UI... process id {}'.format(os.getpid()))        
         shared.demo.close()
         time.sleep(0.5)
         startup_timer.reset()
