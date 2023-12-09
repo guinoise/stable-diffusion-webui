@@ -22,9 +22,7 @@ $TypeData = @{
             (Get-CimInstance Win32_Process -Filter "ProcessId = $($this.Id)").CommandLine
         } elseif (('Unix' -eq [System.Environment]::OSVersion.Platform)) { # it's linux/unix
             Get-Content -LiteralPath "/proc/$($this.Id)/cmdline"
-        } elseif (('MacOSX' -eq [System.Environment]::OSVersion.Platform)) { # it's macos
-            # ???
-        }
+        } 
     }
 }
 Update-TypeData @TypeData -ErrorAction Ignore
