@@ -240,13 +240,21 @@ while [[ "$KEEP_GOING" -eq "1" ]]; do
         printf "Accelerating launch.py..."
         printf "\n%s\n" "${delimiter}"
         prepare_tcmalloc
-        accelerate launch --num_cpu_threads_per_process=6 "${LAUNCH_SCRIPT}" "$@"
+        if ! hash ccze &> /dev/null ; then
+            accelerate launch --num_cpu_threads_per_process=6 "${LAUNCH_SCRIPT}" "$@" 2>&1
+        else 
+	    accelerate launch --num_cpu_threads_per_process=6 "${LAUNCH_SCRIPT}" "$@" 2>&1 | ccze -o noscroll -m ansi
+        fi
     else
         printf "\n%s\n" "${delimiter}"
         printf "Launching launch.py..."
         printf "\n%s\n" "${delimiter}"
         prepare_tcmalloc
-        "${python_cmd}" -u "${LAUNCH_SCRIPT}" "$@"
+        if ! hash ccze &> /dev/null ; then
+            "${python_cmd}" -u "${LAUNCH_SCRIPT}" "$@" 2>&1
+	else
+            "${python_cmd}" -u "${LAUNCH_SCRIPT}" "$@" 2>&1 | ccze -o noscroll -m ansi	
+	fi
     fi
 
     if [[ ! -f tmp/restart ]]; then
