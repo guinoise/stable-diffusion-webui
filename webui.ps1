@@ -4,6 +4,7 @@ if ([string]::IsNullOrEmpty($PSScriptRoot)) {
 } else {
     $BASE_DIR=Resolve-Path $PSScriptRoot
 }
+
 function Get-UnresolvedPath {
     param (
         [string]
@@ -11,6 +12,28 @@ function Get-UnresolvedPath {
     )    
     return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
 }
+
+$TypeData = @{
+    TypeName   = [System.Diagnostics.Process].ToString()
+    MemberType = [System.Management.Automation.PSMemberTypes]::ScriptProperty
+    MemberName = 'CommandLine'
+    Value = {
+        if (('Win32NT' -eq [System.Environment]::OSVersion.Platform)) { # it's windows
+            (Get-CimInstance Win32_Process -Filter "ProcessId = $($this.Id)").CommandLine
+        } elseif (('Unix' -eq [System.Environment]::OSVersion.Platform)) { # it's linux/unix
+            Get-Content -LiteralPath "/proc/$($this.Id)/cmdline"
+        } elseif (('MacOSX' -eq [System.Environment]::OSVersion.Platform)) { # it's macos
+            # ???
+        }
+    }
+}
+Update-TypeData @TypeData -ErrorAction Ignore
+
+function Get-RunningStableDiffusion($virtual_env_directory) {
+    $search= "?$virtual_env_directory*launch*"
+    Get-Process -Name 'python' -ErrorAction Ignore | Where-Object -Property CommandLine -like $search 
+}
+
 function Start-Venv {
     if ($VENV_DIR -eq '-') {
         Skip-Venv
@@ -68,6 +91,13 @@ function Start-App {
     }
     $FINAL_COMMAND="$PROG $LAUNCH_SCRIPT $LAUNCH_OPTIONS_FINAL"
     Write-Output "Command: $FINAL_COMMAND"
+    $running= Get-RunningStableDiffusion
+    if (($running | Measure-Object).Count -gt 0) {
+        Write-Warning "Processes already running : "
+        $running | Format-Table -Property Id, StartTime, ProcessName
+        Write-Warning "Stop those processes"
+        $running | Stop-Process -ErrorAction Continue
+    }
     Invoke-Expression "$FINAL_COMMAND"
     #pause
     exit
