@@ -26,8 +26,11 @@ function Start-Venv {
 }
 
 function New-VENV {
-    Write-Output "Creating venv in directory $VENV_DIR using python $PYTHON and module virtualenv"
-    Invoke-Expression "$PYTHON_FULLNAME -m virtualenv $VENV_DIR"
+    if ([string]::IsNullOrEmpty($VENV_CREATE_PYTHON_VERSION)) {
+        $VENV_CREATE_PYTHON_VERSION=$PYTHON
+    }
+    Write-Output "Creating venv in directory $VENV_DIR using python $VENV_CREATE_PYTHON_VERSION and module virtualenv"
+    Invoke-Expression "$VENV_CREATE_PYTHON_VERSION -m virtualenv $VENV_DIR"
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Unable to create venv in directory $VENV_DIR"
         exit 2
