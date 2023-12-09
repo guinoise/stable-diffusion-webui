@@ -123,7 +123,7 @@ if ($env:COMPUTERNAME -eq "GATAS-ONE") {
     } else {
         $VENV_DIR = $env:VENV_DIR
     }    
-    $DATA_DIR = "$BASE_DIR"
+    $DATA_DIR = Get-UnresolvedPath "$BASE_DIR\..\data_dir"
     $LAUNCH_OPTIONS_SPECIFIC="--xformers"
     $VENV_CREATE_PYTHON_VERSION= Resolve-Path -ErrorAction Ignore "$env:UserProfile\AppData\Local\Programs\Python\Python310\python.exe"
 } else {
