@@ -6,7 +6,7 @@ if ([string]::IsNullOrEmpty($PSScriptRoot)) {
 }
 function Get-UnresolvedPath {
     param (
-        [str]
+        [string]
         $Path
     )    
     return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
@@ -15,31 +15,35 @@ function Start-Venv {
     if ($VENV_DIR -eq '-') {
         Skip-Venv
     }
-
-    if (Test-Path -Path "$VENV_DIR\Scripts\$python") {
-        Enter-Venv
-    } else {
-        $PYTHON_FULLNAME = & $PYTHON -c "import sys; print(sys.executable)"
-        Write-Output "Creating venv in directory $VENV_DIR using python $PYTHON_FULLNAME"
-        Invoke-Expression "$PYTHON_FULLNAME -m virtualenv $VENV_DIR"
-        if ($LASTEXITCODE -eq 0) {
-            Enter-Venv
-        } else {
-            Write-Output "Unable to create venv in directory $VENV_DIR"
-        }
+    $VENV_PYTHON= Resolve-Path -ErrorAction Ignore "$VENV_DIR\Scripts\python.exe"
+#    Write-Host "VENVPYTHON .$VENV_PYTHON."
+#    Write-Host "    PYTHON .$PYTHON."
+#    Write-Host "$(($VENV_PYTHON | Out-String) -eq ($PYTHON | Out-String))"    
+    if ([string]::IsNullOrEmpty($VENV_PYTHON) -or ($VENV_PYTHON | Out-String) -ne ($PYTHON | Out-String)) {
+        New-VENV
     }
+    Enter-Venv
+}
+
+function New-VENV {
+    Write-Output "Creating venv in directory $VENV_DIR using python $PYTHON and module virtualenv"
+    Invoke-Expression "$PYTHON_FULLNAME -m virtualenv $VENV_DIR"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Unable to create venv in directory $VENV_DIR"
+        exit 2
+    }    
 }
 
 function Enter-Venv {
-    $PYTHON = "$VENV_DIR\Scripts\Python.exe"
-    $ACTIVATE = "$VENV_DIR\Scripts\activate.bat"
-    Invoke-Expression "cmd.exe /c $ACTIVATE"
-    Write-Output "Venv set to $VENV_DIR."
-    if ($ACCELERATE -eq 'True') {
-        Test-Accelerate
+    if ($PYTHON -ne "$VENV_DIR\Scripts\Python.exe") {
+        $PYTHON = "$VENV_DIR\Scripts\Python.exe"
+        $ACTIVATE = "$VENV_DIR\Scripts\activate.bat"
+        Invoke-Expression "cmd.exe /c $ACTIVATE"
+        Write-Output "Venv set to $VENV_DIR."
     } else {
-        Start-App
+        Write-Output "Already in VENV."
     }
+    Start-App
 }
 
 function Skip-Venv {
@@ -47,22 +51,14 @@ function Skip-Venv {
     Start-App
 }
 
-function Test-Accelerate {
-    Write-Output 'Checking for accelerate'
-    $ACCELERATE = "$VENV_DIR\Scripts\accelerate.exe"
-    if ($ACCELERATE -eq 'True' -and (Test-Path -Path $ACCELERATE)) {
-        return $true
-    } 
-    return $false
-}
-
 function Start-App {
     #test-accelerate
-    if (Test-Accelerate) {
+    Write-Output 'Checking for accelerate'
+    $ACCELERATE_PROG = "$VENV_DIR\Scripts\accelerate.exe"
+#    Write-Output "ACCELERATE : $ACCELERATE ACCELERATE_PROG : $ACCELERATE_PROG Test-Path: $(Test-Path -Path $ACCELERATE_PROG)"
+    if ($ACCELERATE -eq 'True' -and (Test-Path -Path $ACCELERATE_PROG)) {
         Write-Output 'Accelerating'
-        $PROG="$ACCELERATE launch --num_cpu_threads_per_process=6"
-        #pause
-        exit    
+        $PROG="$ACCELERATE_PROG launch --num_cpu_threads_per_process=6"
     } else {
         Write-Output "Launching with python"
         $PROG="$PYTHON"
@@ -88,12 +84,7 @@ if ($env:COMPUTERNAME -eq "GATAS-ONE") {
     $DATA_DIR = Get-UnresolvedPath "$BASE_DIR\..\data_dir"
     $LAUNCH_OPTIONS_SPECIFIC="--use-cpu all --no-half --no-half-vae --skip-torch-cuda-test"
     $env:TORCH_COMMAND="pip install torch==2.0.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu"    
-    if ([string]::IsNullOrEmpty($env:PYTHON)) {   
-        $tmp_python= Get-UnresolvedPath "$env:UserProfile\AppData\Local\Programs\Python\Python310\python.exe"
-        if (Test-Path "$tmp_python") {
-            $PYTHON= Get-UnresolvedPath "$env:UserProfile\AppData\Local\Programs\Python\Python310\python.exe"
-        }
-    }
+    $VENV_CREATE_PYTHON_VERSION= Resolve-Path -ErrorAction Ignore "$env:UserProfile\AppData\Local\Programs\Python\Python310\python.exe"
 
 } elseif ($env:COMPUTERNAME -eq "MONSTER") {
     if ([string]::IsNullOrEmpty($env:VENV_DIR)) {
@@ -103,12 +94,7 @@ if ($env:COMPUTERNAME -eq "GATAS-ONE") {
     }    
     $DATA_DIR = "$BASE_DIR"
     $LAUNCH_OPTIONS_SPECIFIC="--xformers"
-    if ([string]::IsNullOrEmpty($env:PYTHON)) {   
-        $tmp_python= Get-UnresolvedPath "$env:UserProfile\AppData\Local\Programs\Python\Python310\python.exe"
-        if (Get-Command "$tmp_python") {
-            $PYTHON= Get-UnresolvedPath "$env:UserProfile\AppData\Local\Programs\Python\Python310\python.exe"
-        }
-    }
+    $VENV_CREATE_PYTHON_VERSION= Resolve-Path -ErrorAction Ignore "$env:UserProfile\AppData\Local\Programs\Python\Python310\python.exe"
 } else {
     if ([string]::IsNullOrEmpty($env:VENV_DIR)) {
         $VENV_DIR = Get-UnresolvedPath "$BASE_DIR\venv"
@@ -122,8 +108,8 @@ if ($env:COMPUTERNAME -eq "GATAS-ONE") {
 $LAUNCH_OPTIONS_FINAL="$LAUNCH_OPTIONS_COMMON $LAUNCH_OPTIONS_SPECIFIC --data-dir $DATA_DIR"
 
 if ([string]::IsNullOrEmpty($env:PYTHON) -and [string]::IsNullOrEmpty($PYTHON)) {
-    $PYTHON = "Python.exe"
-} else {
+    $PYTHON = Get-Command "Python.exe" | Resolve-Path
+} elseif ([string]::IsNullOrEmpty($PYTHON))  {
     $PYTHON = $env:PYTHON
 }
 
@@ -144,5 +130,5 @@ try {
         Start-Venv
     }
 } Catch {
-    Write-Output "Couldn't launch python."
+    Write-Output "Couldn't launch python. $PYTHON"
 }
