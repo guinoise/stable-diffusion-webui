@@ -16,6 +16,15 @@
     Will not perform any operation (create venv and start application)
     Usefull to check the folders and options while tuning the webui-user.ps1 (or webui-user.COMPUTERNAME.ps1) file
 
+    .PARAMETER AutoRestart
+    Will restart stable diffusion if the process stop. This restart will occured only if : 
+    1. This script did not restart any other stable diffusion
+    2. The stable diffusion had not been restarted
+
+    .PARAMETER KillOnly
+    Do not start stable diffusion, but kill it if it is running. 
+    This parameter will disregard AutoRestart if provided.
+
     .INPUTS
     None. You can't pipe objects to Add-Extension.
 
@@ -23,8 +32,14 @@
 
 param(
      [Parameter()]
-     [switch]$DryRun
+     [switch]$DryRun,
+     [Parameter()]
+     [switch]$AutoRestart,
+     [Parameter()]
+     [switch]$Killonly
+
  )
+ 
 
 
 ####
@@ -45,7 +60,37 @@ $TypeData = @{
     }
 }
 Update-TypeData @TypeData -ErrorAction Ignore
+function Get-StableDiffusionProcesses {
+    param
+    (
+      [Parameter(ValueFromPipeline)]
+      [System.ComponentModel.Component[]]
+      $Processes
+    )
+    if ($null -eq $Processes) {
+        $Processes= ([array](Get-Process -Name 'accelerate' -ErrorAction SilentlyContinue) + [array](Get-Process -Name 'python' -ErrorAction SilentlyContinue))
+    }
+    $searchRegex= ".?$virtual_env_directory.*launch.*"  
+    $selectedProcesses= @()  
+    foreach($process in $Processes){
+        if ($process.CommandLine -match $searchRegex) {
+            $selectedProcesses+= $process
+        } 
+    }
+    return $selectedProcesses
+}
 
+function Stop-StableDiffusion() {
+    $processes= Get-StableDiffusionProcesses
+    if (($processes | Measure-Object).Count -gt 0) {
+        Write-Warning "Found at least one process already running"
+        $processes | Format-Table -Property Id, StartTime, ProcessName
+        Write-Warning "Stop those processes"
+        if (-not $DryRun) {
+            $processes | Stop-Process -ErrorAction Continue
+        }
+    }    
+}
 ## Resolve-Path does not work with non existing path. This one does
 function Get-UnresolvedPath {
     param (
@@ -65,6 +110,12 @@ if (!$DryRun) {
     Write-Host "Running in real mode."
 }
 
+if ($Killonly) {
+    Write-Host "Only stopping stable diffusions processes"
+    Stop-StableDiffusion
+    exit 0    
+}
+
 #Define the directory of the stable-diffusion-webui (the location of this script), either current ps script root or current directory
 if ([string]::IsNullOrEmpty($PSScriptRoot)) {
     $stable_diffusion_webui_dir=Resolve-Path .
@@ -72,7 +123,14 @@ if ([string]::IsNullOrEmpty($PSScriptRoot)) {
     $stable_diffusion_webui_dir=Resolve-Path $PSScriptRoot
 }
 
+$temp_dir= Join-Path -Path $stable_diffusion_webui_dir -ChildPath "tmp"
+
 Write-Verbose "Stable diffusion webui directory : $stable_diffusion_webui_dir"
+Write-Verbose "Stable diffusion tmp directory   : $temp_dir"
+
+if (-not $DryRun) {
+    New-Item -ItemType Directory -Force -Path "$temp_dir" -ErrorAction SilentlyContinue
+}
 
 $default_option_file= Join-Path -Path $stable_diffusion_webui_dir -ChildPath "webui-user.ps1"
 $computer_option_file= Join-Path -Path $stable_diffusion_webui_dir -ChildPath "webui-user.$env:COMPUTERNAME.ps1"
@@ -227,23 +285,36 @@ if ($env:ACCELERATE -eq 'True') {
 $CMD_ARGS+= "launch.py"
 $CMD_ARGS+= $command_line_arguments
 
-Write-Verbose "Check if already running as python"
-$processes= (Get-Process -Name 'python' -ErrorAction Ignore) + (Get-Process -Name 'accelerate' -ErrorAction Ignore)
-$search= "?$virtual_env_directory*launch*"
-$processes= $processes | Where-Object -Property CommandLine -like "?$virtual_env_directory*launch*"
-if (($processes | Measure-Object).Count -gt 0) {
-    Write-Warning "Found at least one process already running"
-    $processes | Format-Table -Property Id, StartTime, ProcessName
-    Write-Warning "Stop those processes"
-    if (-not $DryRun) {
-        $processes | Stop-Process -ErrorAction Continue
-    }
-}
-Write-Host "Launching $CMD_PROG with arguments $CMD_ARGS"
-if (-not $DryRun) {
+Write-Verbose "Check if already running"
+Stop-StableDiffusion
+
+function Start-StableDiffusion() {
     $process= Start-Process "$CMD_PROG" -ArgumentList $CMD_ARGS -NoNewWindow -PassThru
     Write-Warning "Process launched with ID $($process.Id)"
     Write-Host -ForegroundColor Blue $("=" * $Host.UI.RawUI.WindowSize.Width)
     Write-Host -ForegroundColor Blue $("=" * $Host.UI.RawUI.WindowSize.Width)
-    $process.WaitForExit()
+    return $process
+}
+
+$PIDFILE="$temp_dir\webui.ps1.pid"
+Write-Host "Launching $CMD_PROG with arguments $CMD_ARGS"
+if (-not $DryRun) {
+    $PID | Out-File -FilePath "$PIDFILE"
+    (Start-StableDiffusion).WaitForExit()
+    if ($AutoRestart) {
+        while ($true) {
+            #Check if we are still the last running process
+            $lastPid= Get-Content -Path "$PIDFILE"
+            if ($PID -ne $lastPid) {
+                Write-Error "Auto restart canceled, my pid $PID last Pid $lastPid"
+                exit 0
+            }
+            #Check if had been restarted
+            if ((Get-StableDiffusionProcesses | Measure-Object).Count -gt 0) {
+                Write-Error "Auto restart canceled, for some reason stable diffusion is running"
+                exit 0
+            }
+            (Start-StableDiffusion).WaitForExit()            
+        }
+    }
 }
