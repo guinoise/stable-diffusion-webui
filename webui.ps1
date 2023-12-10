@@ -1,18 +1,37 @@
-#Define base directory, either current ps script root or current directory
-if ([string]::IsNullOrEmpty($PSScriptRoot)) {
-    $BASE_DIR=Resolve-Path .
-} else {
-    $BASE_DIR=Resolve-Path $PSScriptRoot
-}
+<#
+    .SYNOPSIS
+    Start the stable diffusion webui application
 
-function Get-UnresolvedPath {
-    param (
-        [string]
-        $Path
-    )    
-    return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
-}
+    .DESCRIPTION
+    Start the stable diffusion webui application. This script will create the
+    virtual environment for the installation and then start the webui.
 
+    You can customize the parameters in the file webui-user.ps1 or webui-user.COMPUTERNAME.ps1
+    If the file webui-user.COMPUTERNAME.ps1 is present in this directory, it will be used instead
+    of the default one.
+
+    Use the -Verbose option for detailed output
+
+    .PARAMETER DryRun
+    Will not perform any operation (create venv and start application)
+    Usefull to check the folders and options while tuning the webui-user.ps1 (or webui-user.COMPUTERNAME.ps1) file
+
+    .INPUTS
+    None. You can't pipe objects to Add-Extension.
+
+#>
+
+param(
+     [Parameter()]
+     [switch]$DryRun
+ )
+
+
+####
+#### Functions
+####
+
+## Required to check if already running
 $TypeData = @{
     TypeName   = [System.Diagnostics.Process].ToString()
     MemberType = [System.Management.Automation.PSMemberTypes]::ScriptProperty
@@ -27,139 +46,192 @@ $TypeData = @{
 }
 Update-TypeData @TypeData -ErrorAction Ignore
 
-function Get-RunningStableDiffusion($virtual_env_directory) {
-    $search= "?$virtual_env_directory*launch*"
-    Get-Process -Name 'python' -ErrorAction Ignore | Where-Object -Property CommandLine -like $search 
+## Resolve-Path does not work with non existing path. This one does
+function Get-UnresolvedPath {
+    param (
+        [string]
+        $Path
+    )    
+    return $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path)
 }
 
-function Start-Venv {
-    if ($VENV_DIR -eq '-') {
-        Skip-Venv
-    }
-    $VENV_PYTHON= Resolve-Path -ErrorAction Ignore "$VENV_DIR\Scripts\python.exe"
-#    Write-Host "VENVPYTHON .$VENV_PYTHON."
-#    Write-Host "    PYTHON .$PYTHON."
-#    Write-Host "$(($VENV_PYTHON | Out-String) -eq ($PYTHON | Out-String))"    
-    if ([string]::IsNullOrEmpty($VENV_PYTHON) -or ($VENV_PYTHON | Out-String) -ne ($PYTHON | Out-String)) {
-        New-VENV
-    }
-    Enter-Venv
+####
+#### Main script
+####
+if ($DryRun) {
+    Write-Host "Running in dry run mode."
+}
+if (!$DryRun) {
+    Write-Host "Running in real mode."
 }
 
-function New-VENV {
-    if ([string]::IsNullOrEmpty($VENV_CREATE_PYTHON_VERSION)) {
-        $VENV_CREATE_PYTHON_VERSION=$PYTHON
-    }
-    Write-Output "Creating venv in directory $VENV_DIR using python $VENV_CREATE_PYTHON_VERSION and module virtualenv"
-    Invoke-Expression "$VENV_CREATE_PYTHON_VERSION -m virtualenv $VENV_DIR"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Unable to create venv in directory $VENV_DIR"
-        exit 2
-    }    
+#Define the directory of the stable-diffusion-webui (the location of this script), either current ps script root or current directory
+if ([string]::IsNullOrEmpty($PSScriptRoot)) {
+    $stable_diffusion_webui_dir=Resolve-Path .
+} else {
+    $stable_diffusion_webui_dir=Resolve-Path $PSScriptRoot
 }
 
-function Enter-Venv {
-    if ($PYTHON -ne "$VENV_DIR\Scripts\Python.exe") {
-        $PYTHON = "$VENV_DIR\Scripts\Python.exe"
-        $ACTIVATE = "$VENV_DIR\Scripts\activate.bat"
-        Invoke-Expression "cmd.exe /c $ACTIVATE"
-        Write-Output "Venv set to $VENV_DIR."
-    } else {
-        Write-Output "Already in VENV."
-    }
-    Start-App
-}
+Write-Verbose "Stable diffusion webui directory : $stable_diffusion_webui_dir"
 
-function Skip-Venv {
-    Write-Output "Venv set to $VENV_DIR."
-    Start-App
-}
+$default_option_file= Join-Path -Path $stable_diffusion_webui_dir -ChildPath "webui-user.ps1"
+$computer_option_file= Join-Path -Path $stable_diffusion_webui_dir -ChildPath "webui-user.$env:COMPUTERNAME.ps1"
 
-function Start-App {
-    #test-accelerate
-    Write-Output 'Checking for accelerate'
-    $ACCELERATE_PROG = "$VENV_DIR\Scripts\accelerate.exe"
-#    Write-Output "ACCELERATE : $ACCELERATE ACCELERATE_PROG : $ACCELERATE_PROG Test-Path: $(Test-Path -Path $ACCELERATE_PROG)"
-    if ($ACCELERATE -eq 'True' -and (Test-Path -Path $ACCELERATE_PROG)) {
-        Write-Output 'Accelerating'
-        $PROG="$ACCELERATE_PROG launch --num_cpu_threads_per_process=6"
-    } else {
-        Write-Output "Launching with python"
-        $PROG="$PYTHON"
-    }
-    $FINAL_COMMAND="$PROG $LAUNCH_SCRIPT $LAUNCH_OPTIONS_FINAL"
-    Write-Output "Command: $FINAL_COMMAND"
-    $running= Get-RunningStableDiffusion
-    if (($running | Measure-Object).Count -gt 0) {
-        Write-Warning "Processes already running : "
-        $running | Format-Table -Property Id, StartTime, ProcessName
-        Write-Warning "Stop those processes"
-        $running | Stop-Process -ErrorAction Continue
-    }
-    Invoke-Expression "$FINAL_COMMAND"
-    #pause
+if (Test-Path -Path $computer_option_file) {
+    Write-Verbose "Using computer specific option file $computer_option_file"
+    $option_file= $computer_option_file
+} elseif (Test-Path -Path $default_option_file) {
+    Write-Verbose "Using default option file $default_option_file"
+    $option_file= $default_option_file
+} else {
+    Write-Error "Unable to locate option file, one of the following file must be present :"
+    Write-Error "$default_option_file"
+    Write-Error "$computer_option_file"
     exit
 }
 
+Write-Output "Sourcing option file $(Split-Path $option_file -leaf)"
+. $option_file
 
-## OPTIONS START HERE
-#
-## Options for specific computer
-$LAUNCH_OPTIONS_COMMON="--listen --enable-insecure-extension-access --theme dark --allow-code --api --loglevel info"
-if ($env:COMPUTERNAME -eq "GATAS-ONE") {
-    if ([string]::IsNullOrEmpty($env:VENV_DIR)) {
-        $VENV_DIR = Get-UnresolvedPath "$BASE_DIR\..\venv"
-    } else {
-        $VENV_DIR = $env:VENV_DIR
+if ($command_line_arguments -eq $null) {
+    Write-Warning "Command line arguments was null"
+    $command_line_arguments= @()
+}
+
+if (-not [string]::IsNullOrEmpty($env:DATA_DIR)) {
+    if (-not (Test-Path $env:DATA_DIR)) {
+        Write-Warning "Data directory provided does not exists : $env:DATA_DIR"
     }
-    $DATA_DIR = Get-UnresolvedPath "$BASE_DIR\..\data_dir"
-    $LAUNCH_OPTIONS_SPECIFIC="--use-cpu all --no-half --no-half-vae --skip-torch-cuda-test"
-    $env:TORCH_COMMAND="pip install torch==2.0.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu"    
-    $VENV_CREATE_PYTHON_VERSION= Resolve-Path -ErrorAction Ignore "$env:UserProfile\AppData\Local\Programs\Python\Python310\python.exe"
+    $command_line_arguments+= ("--data-dir", "`"$env:DATA_DIR`"")
+}
 
-} elseif ($env:COMPUTERNAME -eq "MONSTER") {
-    if ([string]::IsNullOrEmpty($env:VENV_DIR)) {
-        $VENV_DIR = "$BASE_DIR\venv"
-    } else {
-        $VENV_DIR = $env:VENV_DIR
-    }    
-    $DATA_DIR = Get-UnresolvedPath "$BASE_DIR\..\data_dir"
-    $LAUNCH_OPTIONS_SPECIFIC="--xformers"
-    $VENV_CREATE_PYTHON_VERSION= Resolve-Path -ErrorAction Ignore "$env:UserProfile\AppData\Local\Programs\Python\Python310\python.exe"
+if([string]::IsNullOrEmpty($env:python_cmd)) {
+    Write-Verbose "Setting default python_cmd"
+    $python_cmd= "python.exe"
 } else {
-    if ([string]::IsNullOrEmpty($env:VENV_DIR)) {
-        $VENV_DIR = Get-UnresolvedPath "$BASE_DIR\venv"
+    $python_cmd= $env:python_cmd
+}
+
+if([string]::IsNullOrEmpty($python_venv_interpreter)) {
+    Write-Verbose "Setting venv interpreter to default python interpreter"
+    $python_venv_interpreter= $python_cmd
+}
+if([string]::IsNullOrEmpty($venv_dir)) {
+    $venv_dir= "$stable_diffusion_webui_dir\venv"
+}
+
+
+$python_cmd_path= (Get-Command -ErrorAction Ignore "$python_cmd" | Resolve-Path -ErrorAction Ignore).Path
+$python_venv_interpreter_path= (Get-Command -ErrorAction Ignore "$python_venv_interpreter" | Resolve-Path -ErrorAction Ignore).Path
+$venv_path= Get-UnresolvedPath "$venv_dir"
+$venv_python= Join-Path -Path $venv_path -ChildPath "Scripts\python.exe"
+$venv_activate = Join-Path -Path $venv_path -ChildPath "Scripts\activate.ps1"
+$venv_accelerate = Join-Path -Path $venv_path -ChildPath "Scripts\accelerate.exe"
+
+Write-Host    "Python command          : $python_cmd"
+Write-Verbose "Python command path     : $python_cmd_path"
+Write-Verbose "Python venv command path: $python_venv_interpreter_path"
+Write-Host    "Python venv interpreter : $python_venv_interpreter"
+Write-Host    "Pyhon venv directory    : $venv_path"
+
+if([string]::IsNullOrEmpty($python_cmd_path)) {
+    Write-Error "Python command not found. Command path : $python_cmd"
+    if (-not $DryRun) {
+        exit 1
+    }
+}
+
+$need_create_venv= (-not (Get-Command -ErrorAction Ignore $venv_python) -or -not (Test-Path $venv_path))
+
+if (-not (Get-Command -ErrorAction Ignore $venv_python) -and [string]::IsNullOrEmpty($python_venv_interpreter_path)) {
+    Write-Error "Virtual environment python executable command is invalid and the python interpreter $python_venv_interpreter_path is invalid. Could not create virtual environment"
+    if (-not $DryRun) {
+        exit 1
+    }
+
+}
+
+if ($need_create_venv) {
+    Write-Warning "Creating virtual environment on path $venv_path. Requested interpreter : $python_venv_interpreter_path"
+    $args= @("-m", 
+             "virtualenv",
+             "-p",
+             "`"$python_venv_interpreter_path`"",
+             "`"$venv_dir`"")
+    if (-not $DryRun) {
+        Write-Host -ForegroundColor Blue "** Create venv"
+        Write-Host -ForegroundColor Blue $("-" * $Host.UI.RawUI.WindowSize.Width)
+        $cmd= "& `"$python_cmd_path`" -m virtualenv -p `"$python_venv_interpreter_path`" `"$venv_dir`""
+        Write-Host $cmd
+        Invoke-Expression $cmd
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host -ForegroundColor Red $("-" * $Host.UI.RawUI.WindowSize.Width)
+            Write-Error "Unable to create venv in directory $VENV_DIR"
+            exit 2
+        }        
+        Write-Host -ForegroundColor Blue $("-" * $Host.UI.RawUI.WindowSize.Width)
+        Write-Host -ForegroundColor Blue "** Create venv SUCCESS"
+
+    }
+}
+
+if (-not (Get-Command -ErrorAction Ignore $venv_python)) {
+    Write-Error "Virtual environment python command is invalid : $ven_python"
+    exit 3
+}
+
+if (-not (Test-Path -ErrorAction Ignore $venv_activate)) {
+    Write-Error "Virtual environment activation script not found : $venv_activate"
+    exit 3
+}
+
+$venv_python_cmd= (Get-Command -ErrorAction Ignore "$venv_python" | Resolve-Path -ErrorAction Ignore).Path
+$venv_activate_cmd = (Get-Command -ErrorAction Ignore "$venv_activate" | Resolve-Path -ErrorAction Ignore).Path
+$venv_accelerate_cmd = (Get-Command -ErrorAction Ignore "$venv_accelerate" | Resolve-Path -ErrorAction Ignore).Path
+
+if ([string]::IsNullOrEmpty($venv_activate_cmd)) {
+    Write-Error "Venv activate script not found $venv_activate"
+    exit 4
+}
+if ([string]::IsNullOrEmpty($venv_python_cmd)) {
+    Write-Error "VENV Python executable not found : $venv_python"
+    exit 4
+}
+
+Write-Host "Arguments : $command_line_arguments"
+Write-Host -ForegroundColor Blue "** Activate venv"
+#Write-Host -ForegroundColor Blue $("-" * $Host.UI.RawUI.WindowSize.Width)
+Invoke-Expression ". `"$venv_activate`""
+     
+#Write-Host -ForegroundColor Blue $("-" * $Host.UI.RawUI.WindowSize.Width)
+#Write-Host -ForegroundColor Blue "** activation completed"
+
+$CMD_PROG="$venv_python_cmd"
+$CMD_ARGS=@()
+if ($env:ACCELERATE -eq 'True') {
+    Write-Verbose "Accelerate requested"
+    if ([string]::IsNullOrEmpty($venv_accelerate_cmd)) {
+        Write-Warning "The environment variable ACCELERATE (env:ACCELERATE) is True but $venv_accelerate_cmd not found. Fallback to normal launch"
     } else {
-        $VENV_DIR = $env:VENV_DIR
+        Write-Host "Launching with Accelerate"
+        $CMD_PROG="`"$venv_accelerate_cmd`""
+        $CMD_ARGS=@("launch", "--num_cpu_threads_per_process=6")
     }
-    $DATA_DIR = "$BASE_DIR"
-    $LAUNCH_OPTIONS_SPECIFIC="--xformers --listen --enable-insecure-extension-access --theme dark --allow-code --api --loglevel info"
 }
+$CMD_ARGS+= "launch.py"
+$CMD_ARGS+= $command_line_arguments
 
-$LAUNCH_OPTIONS_FINAL="$LAUNCH_OPTIONS_COMMON $LAUNCH_OPTIONS_SPECIFIC --data-dir $DATA_DIR"
-
-if ([string]::IsNullOrEmpty($env:PYTHON) -and [string]::IsNullOrEmpty($PYTHON)) {
-    $PYTHON = Get-Command "Python.exe" | Resolve-Path
-} elseif ([string]::IsNullOrEmpty($PYTHON))  {
-    $PYTHON = $env:PYTHON
+Write-Verbose "Check if already running as python"
+$processes= (Get-Process -Name 'python' -ErrorAction Ignore) + (Get-Process -Name 'accelerate' -ErrorAction Ignore)
+$search= "?$virtual_env_directory*launch*"
+$processes= $processes | Where-Object -Property CommandLine -like "?$virtual_env_directory*launch*"
+if (($processes | Measure-Object).Count -gt 0) {
+    Write-Warning "Found at least one process already running"
+    $processes | Format-Table -Property Id, StartTime, ProcessName
+    Write-Warning "Stop those processes"
+    $processes | Stop-Process -ErrorAction Continue
 }
-
-if ([string]::IsNullOrEmpty($env:LAUNCH_SCRIPT)) {
-    $LAUNCH_SCRIPT = "$BASE_DIR\launch.py"
-} else {
-    $LAUNCH_SCRIPT = $env:LAUNCH_SCRIPT
-}
-
-#$ERROR_REPORTING = $false
-$tmp_dir = Get-UnresolvedPath "$DATA_DIR\tmp"
-mkdir "$tmp_dir" 2>$null
-
-
-
-try {
-    if(Get-Command $PYTHON){
-        Start-Venv
-    }
-} Catch {
-    Write-Output "Couldn't launch python. $PYTHON"
-}
+Write-Host "Launching $CMD_PROG with arguments $CMD_ARGS"
+$process= Start-Process "$CMD_PROG" -ArgumentList $CMD_ARGS -NoNewWindow -PassThru
+Write-Warning "Process launched with ID $($process.Id)"
+$process.WaitForExit()
