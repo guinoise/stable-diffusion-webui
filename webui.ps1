@@ -177,12 +177,16 @@ if ($need_create_venv) {
 
 if (-not (Get-Command -ErrorAction Ignore $venv_python)) {
     Write-Error "Virtual environment python command is invalid : $ven_python"
-    exit 3
+    if (-not $DryRun) {
+        exit 3
+    }
 }
 
 if (-not (Test-Path -ErrorAction Ignore $venv_activate)) {
     Write-Error "Virtual environment activation script not found : $venv_activate"
-    exit 3
+    if (-not $DryRun) {
+        exit 3
+    }
 }
 
 $venv_python_cmd= (Get-Command -ErrorAction Ignore "$venv_python" | Resolve-Path -ErrorAction Ignore).Path
@@ -191,20 +195,22 @@ $venv_accelerate_cmd = (Get-Command -ErrorAction Ignore "$venv_accelerate" | Res
 
 if ([string]::IsNullOrEmpty($venv_activate_cmd)) {
     Write-Error "Venv activate script not found $venv_activate"
-    exit 4
+    if (-not $DryRun) {
+        exit 4
+    }
 }
 if ([string]::IsNullOrEmpty($venv_python_cmd)) {
     Write-Error "VENV Python executable not found : $venv_python"
-    exit 4
+    if (-not $DryRun) {
+        exit 4
+    }
 }
 
 Write-Host "Arguments : $command_line_arguments"
 Write-Host -ForegroundColor Blue "** Activate venv"
-#Write-Host -ForegroundColor Blue $("-" * $Host.UI.RawUI.WindowSize.Width)
-Invoke-Expression ". `"$venv_activate`""
-     
-#Write-Host -ForegroundColor Blue $("-" * $Host.UI.RawUI.WindowSize.Width)
-#Write-Host -ForegroundColor Blue "** activation completed"
+if (-not $DryRun) {
+    Invoke-Expression ". `"$venv_activate`""
+}
 
 $CMD_PROG="$venv_python_cmd"
 $CMD_ARGS=@()
@@ -229,9 +235,15 @@ if (($processes | Measure-Object).Count -gt 0) {
     Write-Warning "Found at least one process already running"
     $processes | Format-Table -Property Id, StartTime, ProcessName
     Write-Warning "Stop those processes"
-    $processes | Stop-Process -ErrorAction Continue
+    if (-not $DryRun) {
+        $processes | Stop-Process -ErrorAction Continue
+    }
 }
 Write-Host "Launching $CMD_PROG with arguments $CMD_ARGS"
-$process= Start-Process "$CMD_PROG" -ArgumentList $CMD_ARGS -NoNewWindow -PassThru
-Write-Warning "Process launched with ID $($process.Id)"
-$process.WaitForExit()
+if (-not $DryRun) {
+    $process= Start-Process "$CMD_PROG" -ArgumentList $CMD_ARGS -NoNewWindow -PassThru
+    Write-Warning "Process launched with ID $($process.Id)"
+    Write-Host -ForegroundColor Blue $("=" * $Host.UI.RawUI.WindowSize.Width)
+    Write-Host -ForegroundColor Blue $("=" * $Host.UI.RawUI.WindowSize.Width)
+    $process.WaitForExit()
+}
