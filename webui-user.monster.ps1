@@ -23,7 +23,8 @@ $command_line_arguments= @("--listen",
                             "--allow-code",
                             "--api",
                             "--loglevel info",
-                            "--xformers")
+                            "--xformers",
+                            "--gradio-allowed-path=`"D:\ai\stable-diffusion\data_dir\extensions\sd-webui-prompt-all-in-one\`"")
 
 # python3 executable
 #$env:python_cmd="python.exe"
