@@ -160,7 +160,7 @@ if (-not [string]::IsNullOrEmpty($env:DATA_DIR)) {
     if (-not (Test-Path $env:DATA_DIR)) {
         Write-Warning "Data directory provided does not exists : $env:DATA_DIR"
     }
-    $command_line_arguments+= ("--data-dir", "`"$env:DATA_DIR`"")
+    $command_line_arguments= ("--data-dir", "`"$env:DATA_DIR`"") + $command_line_arguments
 }
 
 if([string]::IsNullOrEmpty($env:python_cmd)) {
