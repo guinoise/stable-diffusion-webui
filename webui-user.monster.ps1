@@ -32,7 +32,7 @@ $command_line_arguments= @("--listen",
 # python executable to create venv if required. 
 # by default $env:python_cmd or python.exe will be used
 # use this variable for a specific version of python currently sd webui require python3.10
-#$python_venv_interpreter="$env:UserProfile\AppData\Local\Programs\Python\Python310\python.exe"
+$python_venv_interpreter="$env:UserProfile\AppData\Local\Programs\Python\Python310\python.exe"
 
 # python3 venv directory (defaults to $stable_diffusion_webui_dir/venv
 # could be relative path to $stable_diffusion_webui_dir
