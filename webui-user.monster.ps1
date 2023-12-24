@@ -23,9 +23,11 @@ $command_line_arguments= @("--listen",
                             "--allow-code",
                             "--api",
                             "--loglevel info",
-                            "--xformers")
+                            "--xformers",
+							"--no-progressbar-hiding",
+							"--skip-load-model-at-start")
 #                            "--gradio-allowed-path=D:\ai\stable-diffusion\data_dir\extensions\sd-webui-prompt-all-in-one\")
-
+$env:SD_WEBUI_LOG_LEVEL="info"
 # python3 executable
 #$env:python_cmd="python.exe"
 
