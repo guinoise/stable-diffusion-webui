@@ -23,14 +23,12 @@ $command_line_arguments= @("--listen",
                             "--allow-code",
                             "--api",
                             "--loglevel info",
-                            "--xformers",
                             "--use-cpu", "all", 
                             "--no-half", 
                             "--no-half-vae", 
                             "--skip-torch-cuda-test",
-							"--skip-load-model-at-start"
-                            )
-
+                            "--skip-load-model-at-start"
+)
 #                            "--ui-debug-mode",
 # python3 executable
 #$env:python_cmd="python.exe"
