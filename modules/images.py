@@ -12,7 +12,7 @@ import re
 import numpy as np
 import piexif
 import piexif.helper
-from PIL import Image, ImageFont, ImageDraw, ImageColor, PngImagePlugin
+from PIL import Image, ImageFont, ImageDraw, ImageColor, PngImagePlugin, ImageOps
 import string
 import json
 import hashlib
@@ -61,12 +61,17 @@ def image_grid(imgs, batch_size=1, rows=None):
     return grid
 
 
-Grid = namedtuple("Grid", ["tiles", "tile_w", "tile_h", "image_w", "image_h", "overlap"])
+class Grid(namedtuple("_Grid", ["tiles", "tile_w", "tile_h", "image_w", "image_h", "overlap"])):
+    @property
+    def tile_count(self) -> int:
+        """
+        The total number of tiles in the grid.
+        """
+        return sum(len(row[2]) for row in self.tiles)
 
 
-def split_grid(image, tile_w=512, tile_h=512, overlap=64):
-    w = image.width
-    h = image.height
+def split_grid(image: Image.Image, tile_w: int = 512, tile_h: int = 512, overlap: int = 64) -> Grid:
+    w, h = image.size
 
     non_overlap_width = tile_w - overlap
     non_overlap_height = tile_h - overlap
@@ -316,13 +321,16 @@ def resize_image(resize_mode, im, width, height, upscaler_name=None):
     return res
 
 
-invalid_filename_chars = '<>:"/\\|?*\n\r\t'
+if not shared.cmd_opts.unix_filenames_sanitization:
+    invalid_filename_chars = '#<>:"/\\|?*\n\r\t'
+else:
+    invalid_filename_chars = '/'
 invalid_filename_prefix = ' '
 invalid_filename_postfix = ' .'
 re_nonletters = re.compile(r'[\s' + string.punctuation + ']+')
 re_pattern = re.compile(r"(.*?)(?:\[([^\[\]]+)\]|$)")
 re_pattern_arg = re.compile(r"(.*)<([^>]*)>$")
-max_filename_part_length = 128
+max_filename_part_length = shared.cmd_opts.filenames_max_length
 NOTHING_AND_SKIP_PREVIOUS_TEXT = object()
 
 
@@ -561,6 +569,8 @@ def save_image_with_geninfo(image, geninfo, filename, extension=None, existing_p
             })
 
             piexif.insert(exif_bytes, filename)
+    elif extension.lower() == ".gif":
+        image.save(filename, format=image_format, comment=geninfo)
     else:
         image.save(filename, format=image_format, quality=opts.jpeg_quality)
 
@@ -661,7 +671,13 @@ def save_image(image, path, basename, seed=None, prompt=None, extension='png', i
 
         save_image_with_geninfo(image_to_save, info, temp_file_path, extension, existing_pnginfo=params.pnginfo, pnginfo_section_name=pnginfo_section_name)
 
-        os.replace(temp_file_path, filename_without_extension + extension)
+        filename = filename_without_extension + extension
+        if shared.opts.save_images_replace_action != "Replace":
+            n = 0
+            while os.path.exists(filename):
+                n += 1
+                filename = f"{filename_without_extension}-{n}{extension}"
+        os.replace(temp_file_path, filename)
 
     fullfn_without_extension, extension = os.path.splitext(params.filename)
     if hasattr(os, 'statvfs'):
@@ -718,7 +734,12 @@ def read_info_from_image(image: Image.Image) -> tuple[str | None, dict]:
     geninfo = items.pop('parameters', None)
 
     if "exif" in items:
-        exif = piexif.load(items["exif"])
+        exif_data = items["exif"]
+        try:
+            exif = piexif.load(exif_data)
+        except OSError:
+            # memory / exif was not valid so piexif tried to read from a file
+            exif = None
         exif_comment = (exif or {}).get("Exif", {}).get(piexif.ExifIFD.UserComment, b'')
         try:
             exif_comment = piexif.helper.UserComment.load(exif_comment)
@@ -728,6 +749,8 @@ def read_info_from_image(image: Image.Image) -> tuple[str | None, dict]:
         if exif_comment:
             items['exif comment'] = exif_comment
             geninfo = exif_comment
+    elif "comment" in items: # for gif
+        geninfo = items["comment"].decode('utf8', errors="ignore")
 
     for field in IGNORED_INFO_KEYS:
         items.pop(field, None)
@@ -750,7 +773,7 @@ def image_data(data):
     import gradio as gr
 
     try:
-        image = Image.open(io.BytesIO(data))
+        image = read(io.BytesIO(data))
         textinfo, _ = read_info_from_image(image)
         return textinfo, None
     except Exception:
@@ -776,3 +799,31 @@ def flatten(img, bgcolor):
         img = background
 
     return img.convert('RGB')
+
+
+def read(fp, **kwargs):
+    image = Image.open(fp, **kwargs)
+    image = fix_image(image)
+
+    return image
+
+
+def fix_image(image: Image.Image):
+    if image is None:
+        return None
+
+    try:
+        image = ImageOps.exif_transpose(image)
+        image = fix_png_transparency(image)
+    except Exception:
+        pass
+
+    return image
+
+
+def fix_png_transparency(image: Image.Image):
+    if image.mode not in ("RGB", "P") or not isinstance(image.info.get("transparency"), bytes):
+        return image
+
+    image = image.convert("RGBA")
+    return image
