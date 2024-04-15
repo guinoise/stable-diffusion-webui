@@ -23,11 +23,10 @@ $command_line_arguments= @("--listen",
                             "--allow-code",
                             "--api",
                             "--loglevel info",
-                            "--xformers",
                             "--use-cpu", "all", 
                             "--no-half", 
                             "--no-half-vae", 
-                            "--ui-debug-mode",
+#                            "--ui-debug-mode",
                             "--skip-torch-cuda-test"
                             )
 
